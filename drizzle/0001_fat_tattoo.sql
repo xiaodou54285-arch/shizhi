@@ -1,0 +1,1 @@
+CREATE INDEX `learning_files_user_idx` ON `learning_files` (`user_id`);

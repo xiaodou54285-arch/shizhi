@@ -1,0 +1,16 @@
+# Copy to .dev.vars for local development. Never commit .dev.vars.
+# Local preview signs in as seedy@sites.test.
+AI_ALLOWED_EMAIL="seedy@sites.test"
+COURSE_IMPORT_OWNER_EMAIL="seedy@sites.test"
+APP_ORIGIN="http://127.0.0.1:5173"
+
+# Optional AI provider. Replace the model ID/capabilities with supported values.
+DEEPSEEK_API_KEY=""
+AI_PROVIDERS_JSON='[{"id":"deepseek","label":"DeepSeek","baseURL":"https://api.deepseek.com/v1","protocol":"chat","keyEnv":"DEEPSEEK_API_KEY","models":[{"id":"deepseek-flash","label":"DeepSeek Flash","vision":true}]}]'
+OPENAI_API_KEY=""
+CLAUDE_API_KEY=""
+
+# Optional Quark integration. Supply your own authorized configuration.
+QUARK_ALLOWED_EMAIL=""
+QUARK_AUTH_JSON=""
+QUARK_ENCRYPTION_KEY=""
