@@ -28,4 +28,11 @@ export async function courseFolder(client:QuarkClient,userId:string,course:{id:s
  const id=userId+':'+course.id;const existing=await env.DB!.prepare('SELECT fid FROM learning_quark_folders WHERE id=?').bind(id).first<{fid:string}>();if(existing)return existing.fid;
  const folder=await client.createFolder(safeName(course.name)+'（'+course.id.slice(-8)+'）',client.config.rootFid);await env.DB!.prepare('INSERT OR IGNORE INTO learning_quark_folders(id,fid) VALUES(?,?)').bind(id,folder.fid).run();return folder.fid;
 }
+export async function documentFolder(client:QuarkClient,userId:string,course:{id:string;name:string},folder:{id:string;name:string;kind:string}){
+ const groupId=userId+':group:'+course.id+':'+folder.kind,folderId=userId+':folder:'+folder.id;
+ const ensure=async(id:string,name:string,parent:string)=>{const existing=await env.DB!.prepare('SELECT fid FROM learning_quark_folders WHERE id=?').bind(id).first<{fid:string}>();if(existing?.fid)return existing.fid;
+  await env.DB!.prepare('INSERT OR IGNORE INTO learning_quark_notes(id,digest,fid,locked_until) VALUES(?,?,?,0)').bind('folder-lock:'+id,'','').run();const lease=await env.DB!.prepare('UPDATE learning_quark_notes SET locked_until=? WHERE id=? AND locked_until<?').bind(Date.now()+120000,'folder-lock:'+id,Date.now()).run();if(!lease.meta.changes)throw new ApiError(503,'文件夹正在同步，请稍后重试');
+  try{const current=await env.DB!.prepare('SELECT fid FROM learning_quark_folders WHERE id=?').bind(id).first<{fid:string}>();if(current?.fid)return current.fid;const made=await client.createFolder(safeName(name),parent);await env.DB!.prepare('INSERT OR IGNORE INTO learning_quark_folders(id,fid) VALUES(?,?)').bind(id,made.fid).run();return made.fid;}finally{await env.DB!.prepare('UPDATE learning_quark_notes SET locked_until=0 WHERE id=?').bind('folder-lock:'+id).run();}};
+ const parent=await courseFolder(client,userId,course),group=await ensure(groupId,folder.kind==='paper'?'纸质笔记':folder.kind==='homework'?'作业手稿':'课件与文档',parent);return ensure(folderId,folder.name,group);
+}
 export function quarkFailure(error:unknown){if(error instanceof ApiError)return error;if(error instanceof QuarkError)return new ApiError(503,'夸克归档暂未完成：'+error.message);console.error('Quark internal failure',error instanceof Error?error.name:'unknown');return new ApiError(503,'夸克归档暂未完成，请稍后重试');}

@@ -29,7 +29,7 @@ export async function POST(req:Request){
   const chosen=selectProvider(runtime(),data.modelId||selected.conversation.aiModel),apiKey=chosen.key;
   selected=selectLearningRequest(snapshot,data);
   if(data.webSearch!==undefined&&typeof data.webSearch!=='boolean')throw new ApiError(400,'联网选项不正确');
-  if(selected.files.some((f:any)=>f.data?.startsWith('data:image/'))&&!chosen.model.vision)throw new ApiError(400,'这个模型不支持图片，请更换模型。');
+  if(selected.files.some((f:any)=>f.data?.startsWith('data:image/')||f.images?.length)&&!chosen.model.vision)throw new ApiError(400,'这个模型不支持图片，请更换模型。');
   if(selected.files.some((f:any)=>f.data?.startsWith('data:application/pdf;'))&&(!chosen.model.pdf||chosen.provider.protocol!=='responses'))throw new ApiError(400,'这个模型不支持直接读取 PDF，请换模型或附上页面图片。');
   const model=()=>chosen.option.id;
   const prompt=buildLearningInput(snapshot,selected);

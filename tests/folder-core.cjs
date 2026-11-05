@@ -1,0 +1,7 @@
+const fs=require('fs'),assert=require('assert/strict'),ts=require('typescript');const compile=(f,d={})=>{const m={exports:{}};new Function('require','exports','module',ts.transpileModule(fs.readFileSync(f,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(n=>d[n],m.exports,m);return m.exports};
+const x={exports:{}};new Function('module',fs.readFileSync(require('path').join(__dirname,'..','public','sync-core.js'),'utf8'))(x);const core=x.exports;
+const wrap=(file,folders=[])=>({courses:[{id:'a',name:'A',category:'专业课'}],lessons:{a:[]},state:{fileMeta:[file],fileFolders:folders}});
+const folder={id:'f',course:'a',kind:'paper',name:'第一章',updatedAt:5};const fresh={id:'x',course:'a',kind:'paper',name:'x.png',type:'image/png',size:1,folderId:'f',folderUpdatedAt:10,updatedAt:10},old={...fresh,updatedAt:30};delete old.folderId;delete old.folderUpdatedAt;
+const merged=core.merge(wrap(fresh,[folder]),wrap(old));assert.equal(merged.state.fileMeta[0].folderId,'f');assert.equal(core.course(merged,'a').state.fileFolders[0].id,'f');assert.equal(core.replaceCourse(core.blank(),core.course(merged,'a'),'a').state.fileMeta[0].folderId,'f');
+const back=core.merge(merged,wrap({...fresh,folderId:'',folderUpdatedAt:50,updatedAt:50}));assert.equal(back.state.fileMeta[0].folderId,'');
+console.log('PASS: folder and file location survive stale-device edits, partitioning and explicit move back to root.');

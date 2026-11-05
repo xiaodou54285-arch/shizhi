@@ -1,9 +1,9 @@
 (function(){
- const core=KoSyncCore,fields={deletedFiles:'shizhi-deleted-files',deletedConversations:'shizhi-deleted-conversations',conversations:'shizhi-conversations',fileMeta:'shizhi-files',questionRecords:'shizhi-questions',summaryRecords:'shizhi-summaries',savedNotes:'shizhi-notes',quizRecords:'shizhi-quiz-records',courseMemories:'shizhi-course-memories'};
+ const core=KoSyncCore,fields={deletedFiles:'shizhi-deleted-files',deletedConversations:'shizhi-deleted-conversations',conversations:'shizhi-conversations',fileMeta:'shizhi-files',fileFolders:'shizhi-file-folders',questionRecords:'shizhi-questions',summaryRecords:'shizhi-summaries',savedNotes:'shizhi-notes',quizRecords:'shizhi-quiz-records',courseMemories:'shizhi-course-memories'};
  let accountKey='',authBlocked=false,lastSyncError=null,syncCourseId=null;
- let prefix='',revision=0,last=core.blank(),adapter=null,dirty=false,online=false,busy=false,booted=false,timer=null,db=null,cacheQueue=Promise.resolve(),retryDelay=2000,catalogDirty=false;
+ let prefix='',revision=0,last=core.blank(),adapter=null,dirty=false,online=false,busy=false,pollBusy=false,booted=false,timer=null,db=null,cacheQueue=Promise.resolve(),retryDelay=2000,catalogDirty=false;
  let partitions={},savedCatalog=[],quarkConnected=false,archiveBusy=false,paperDeleteBusy=false;
- const loaded=new Set(),pending=new Set(),versions=new Map(),resets=new Map(),knownFiles=new Set(),loading=new Map(),archivedFiles=new Set(),archivedNotes=new Map();
+ const loaded=new Set(),pending=new Set(),versions=new Map(),resets=new Map(),knownFiles=new Set(),loading=new Map(),archivedFiles=new Set(),archivedNotes=new Map(),archivedFolders=new Set(),archivedLocations=new Map();
  const status=(text,kind='pending')=>{const b=document.getElementById('cloud-status');if(b){b.textContent=text;b.dataset.kind=kind;}};
  const archiveStatus=(text,kind='pending')=>{const b=document.getElementById('quark-status');if(b){b.textContent=text;b.title=text;b.dataset.kind=kind;b.hidden=kind!=='error';}document.dispatchEvent(new Event('shizhi-archive-status'));};
  function authNotice(changed=false){authBlocked=true;clearTimeout(timer);let box=document.getElementById('account-notice');if(!box){box=document.createElement('div');box.id='account-notice';box.setAttribute('role','alert');box.style.cssText='position:fixed;inset:0 0 auto;z-index:10000;padding:16px;background:#172d28;color:white;text-align:center;box-shadow:0 2px 14px #0003';document.body.append(box);}box.replaceChildren(document.createTextNode(changed?'账号已切换。请刷新以打开当前账号；原账号的本机记录会保留。 ':'登录已失效，本机记录仍保留。 '));const link=document.createElement('a');link.style.cssText='color:white;text-decoration:underline;margin-left:12px';link.textContent=changed?'刷新页面':'重新登录';link.href=changed?location.href:'/signin-with-chatgpt?return_to='+encodeURIComponent(location.pathname+location.search+location.hash);box.append(link);if(changed){box.style.inset='0';box.style.paddingTop='25vh';}}
@@ -25,18 +25,30 @@
  function capture(){if(!adapter)return;const current=core.stamp(core.project(adapter.snapshot()),last);if(!core.equal(current,last)){if(!core.equal(current.courses,last.courses))catalogDirty=true;for(const c of current.courses)if(!core.equal({...core.course(current,c.id),courses:[]},{...core.course(last,c.id),courses:[]})){loaded.add(c.id);pending.add(c.id);}last=core.clone(current);apply(false);persist();schedule();}}
  async function upload(part){for(const f of part.state.fileMeta){if(knownFiles.has(f.id))continue;let r=await request('/api/files/'+encodeURIComponent(f.id),{method:'HEAD'});if(r.ok){knownFiles.add(f.id);continue;}if(r.status!==404)throw new Error('附件状态暂时无法读取');const entry=await adapter.localFile(f.id);if(!entry?.blob)throw new Error('原文件缺失：'+f.name+'，请恢复完整备份');r=await request('/api/files/'+encodeURIComponent(f.id),{method:'PUT',headers:{'Content-Type':f.type},body:entry.blob});if(!r.ok)await result(r);knownFiles.add(f.id);}}
  function noteKey(s,id){return JSON.stringify({notes:s.state.savedNotes.filter(n=>n.course===id),papers:s.state.fileMeta.filter(f=>f.course===id&&['paper','material'].includes(f.kind)).map(f=>({id:f.id,title:f.title,transcript:f.transcript})),summary:s.state.summaryRecords[id],memory:s.state.courseMemories[id],review:s.state.conversations.filter(c=>c.course===id&&c.mode==='review')});}
- async function archive(snapshot){if(!quarkConnected||archiveBusy||paperDeleteBusy||!navigator.onLine)return;const files=snapshot.state.fileMeta.filter(f=>(f.kind==='paper'||f.archive===true)&&!archivedFiles.has(f.id)).slice(0,3),courseIds=[...loaded].filter(id=>noteKey(snapshot,id)!==archivedNotes.get(id)).slice(0,3);if(!files.length&&!courseIds.length)return;archiveBusy=true;try{const r=await accountFetch('/api/quark',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({fileIds:files.map(f=>f.id),courseIds,contextCourseIds:[...new Set([...courseIds,...files.map(f=>f.course)])]}),signal:AbortSignal.timeout(120000)}),data=await result(r);for(const id of data.saved||[])archivedFiles.add(id);for(const id of courseIds)if(!(data.notesPending||[]).includes(id))archivedNotes.set(id,noteKey(snapshot,id));if((data.pending||[]).length||(data.notesPending||[]).length)throw new Error(data.message||'附件等待保存');archiveStatus('附件已保存','saved');}catch(e){archiveStatus('归档未完成：'+e.message+' · 点击重试','error');}finally{archiveBusy=false;}}
+ async function archive(snapshot){
+  if(!quarkConnected||archiveBusy||paperDeleteBusy||!navigator.onLine)return;
+  const files=snapshot.state.fileMeta.filter(f=>(f.kind==='paper'||f.archive===true)&&(!archivedFiles.has(f.id)||archivedLocations.get(f.id)!==(f.folderId||''))).slice(0,3);
+  const folders=snapshot.state.fileFolders.filter(f=>!archivedFolders.has(f.id)).slice(0,3),courseIds=[...loaded].filter(id=>noteKey(snapshot,id)!==archivedNotes.get(id)).slice(0,3);
+  if(!files.length&&!folders.length&&!courseIds.length)return;archiveBusy=true;let completed=false;
+  try{const contextCourseIds=[...new Set([...courseIds,...files.map(f=>f.course),...folders.map(f=>f.course)])];
+   const r=await accountFetch('/api/quark',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({fileIds:files.map(f=>f.id),folderIds:folders.map(f=>f.id),courseIds,contextCourseIds}),signal:AbortSignal.timeout(120000)}),data=await result(r);
+   for(const id of data.saved||[]){archivedFiles.add(id);const f=files.find(f=>f.id===id);if(f)archivedLocations.set(id,f.folderId||'');}for(const id of data.folderSaved||[])archivedFolders.add(id);
+   for(const id of courseIds)if(!(data.notesPending||[]).includes(id))archivedNotes.set(id,noteKey(snapshot,id));
+   if((data.pending||[]).length||(data.folderPending||[]).length||(data.notesPending||[]).length)throw new Error(data.message||'附件或文件夹等待保存');archiveStatus('附件已保存','saved');completed=true;
+  }catch(e){archiveStatus('归档未完成：'+e.message+' · 点击重试','error');}finally{archiveBusy=false;if(completed&&(files.length===3||folders.length===3||courseIds.length===3))setTimeout(()=>archive(core.clone(last)),0);}
+ }
 
  const archiveChecked=new Set(),archiveChecks=new Map();
  async function checkArchiveFiles(ids){const queue=[...new Set(ids)];await Promise.all(Array.from({length:Math.min(4,queue.length)},async()=>{while(queue.length){const id=queue.shift();if(archivedFiles.has(id)||archiveChecked.has(id))continue;if(archiveChecks.has(id)){await archiveChecks.get(id);continue;}const task=(async()=>{try{const r=await request('/api/files/'+encodeURIComponent(id),{method:'HEAD'});if(r.ok){archiveChecked.add(id);if(r.headers.get('X-Archive-Status')==='saved'){archivedFiles.add(id);document.dispatchEvent(new Event('shizhi-archive-status'));}}}catch{/* A failed check is not a confirmed archive. */}})();archiveChecks.set(id,task);try{await task;}finally{archiveChecks.delete(id);}}}));}
- async function connectQuark(){try{await result(await request('/api/quark'));quarkConnected=true;await flush();}catch(e){quarkConnected=false;archiveStatus('夸克未连接：'+e.message+' · 点击重试','error');}}
+async function connectQuark(){try{await result(await request('/api/quark'));quarkConnected=true;await flush({archive:true});}catch(e){quarkConnected=false;archiveStatus('夸克未连接：'+e.message+' · 点击重试','error');}}
  async function flush(options={}){
   if(authBlocked||!booted||!adapter||busy||(paperDeleteBusy&&!options.forDeletion))return;
   if(!navigator.onLine){status('暂存本机 · 等待联网');return;}
   busy=true;syncCourseId=null;lastSyncError=null;clearTimeout(timer);
-  const before=core.clone(last),previousStats=JSON.stringify(Object.entries(partitions).map(([id,p])=>[id,p.stats]));
+  const before=core.clone(last),wasDirty=catalogDirty||pending.size>0,previousStats=JSON.stringify(Object.entries(partitions).map(([id,p])=>[id,p.stats]));
   try{
-   capture();await cacheQueue;await catalog();apply(false);
+   capture();await cacheQueue;await catalog();
+   if(!core.equal(before,last))apply(false);
    if(catalogDirty){await result(await request('/api/workspace',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({scope:'catalog',courses:last.courses})}));await catalog();}
    // The catalog gives the course revision. Reuse the loaded snapshot when it
    // matches; the write CAS still rejects a concurrent change after this read.
@@ -52,9 +64,12 @@
    }
    // A foreground send need not wait for unrelated courses to refresh.
    if(!options.courseId)for(const id of [...loaded])if(!pending.has(id)&&Number(partitions[id]?.revision||0)>Number(versions.get(id)||0)){syncCourseId=id;await ensureCourse(id,true);}
-   dirty=catalogDirty||pending.size>0;await persist();apply(!core.equal(before,last)||previousStats!==JSON.stringify(Object.entries(partitions).map(([id,p])=>[id,p.stats])));
+   dirty=catalogDirty||pending.size>0;
+   const changed=!core.equal(before,last),statsChanged=previousStats!==JSON.stringify(Object.entries(partitions).map(([id,p])=>[id,p.stats]));
+   if(changed||wasDirty||dirty)await persist();
+   if(changed||statsChanged)apply(true);
    status(dirty?'保存中…':'已保存',dirty?'pending':'saved');if(dirty)schedule();retryDelay=2000;
-   if(!options.forDeletion){void archive(core.clone(last));void cleanupDeletedFiles();}
+   if(!options.forDeletion){if(changed||wasDirty||options.archive)void archive(core.clone(last));void cleanupDeletedFiles();}
   }catch(e){
    online=false;dirty=catalogDirty||pending.size>0;
    const timeout=e.name==='TimeoutError'||e.name==='AbortError';
@@ -83,8 +98,9 @@
  async function history(id){await flush();return result(await request('/api/workspace?courseId='+encodeURIComponent(id)));}
  async function restore(id,version){if(busy)throw new Error('请等当前保存完成后再恢复');await flush();if(pending.has(id))throw new Error('请先完成本课同步');const latest=await history(id);await result(await request('/api/workspace',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({scope:'course',courseId:id,revision:latest.courseRevision,restoreRevision:version})}));await ensureCourse(id,true);apply(true);}
  async function remoteFile(id){if(!knownFiles.has(id))return null;const r=await request('/api/files/'+encodeURIComponent(id));return r.ok?{id,blob:await r.blob()}:null;}
- function attach(value){adapter=value;capture();if(dirty)schedule(100);document.getElementById('cloud-status').onclick=flush;document.getElementById('quark-status').onclick=connectQuark;connectQuark();setInterval(()=>{if(document.visibilityState==='visible'&&!busy)flush();},10000);window.addEventListener('online',flush);window.addEventListener('offline',()=>status('暂存本机 · 等待联网'));document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')flush();});}
- window.KoCloud={fetch:accountFetch,bootstrap,attach,deletePaper,checkArchiveFiles,retryArchive:connectQuark,changed:capture,remoteFile,flush,waitForCourse,status,fileArchived:id=>archivedFiles.has(id),ensureCourse,ensureAll,history,restore,stats:id=>partitions[id]?.stats,hasCourse:id=>loaded.has(id),cacheValue:key=>core.clone(key==='shizhi-extra-courses'?last.courses:key==='shizhi-restored-lessons'?last.lessons:last.state[Object.keys(fields).find(f=>fields[f]===key)]??null),manages:key=>Object.values(fields).includes(key)||['shizhi-extra-courses','shizhi-restored-lessons'].includes(key),inspect:()=>({revision,dirty,online,busy,archiveBusy,quarkConnected,lastSyncError,syncCourseId,pendingCourses:[...pending],loadedCourses:[...loaded],archivedFiles:[...archivedFiles]})};
+ async function poll(){if(authBlocked||!booted||!adapter||busy||pollBusy||document.visibilityState!=='visible'||!navigator.onLine)return;pollBusy=true;try{if(dirty||catalogDirty||pending.size){await flush();return;}const remote=await result(await request('/api/workspace?catalog=1'));checkAccount(remote);if(remote.revision!==revision)await flush();}catch{if(!authBlocked)status('同步未完成 · 点击重试','error');}finally{pollBusy=false;}}
+ function attach(value){adapter=value;capture();if(dirty)schedule(100);document.getElementById('cloud-status').onclick=flush;document.getElementById('quark-status').onclick=connectQuark;connectQuark();setInterval(poll,10000);window.addEventListener('online',flush);window.addEventListener('offline',()=>status('暂存本机 · 等待联网'));document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')poll();});}
+ window.KoCloud={fetch:accountFetch,bootstrap,attach,deletePaper,checkArchiveFiles,retryArchive:connectQuark,folderArchived:id=>archivedFolders.has(id),changed:capture,remoteFile,flush,waitForCourse,status,fileArchived:id=>{const f=last.state.fileMeta.find(f=>f.id===id);return archivedFiles.has(id)&&(!f?.folderUpdatedAt||archivedLocations.get(id)===(f.folderId||''));},ensureCourse,ensureAll,history,restore,stats:id=>partitions[id]?.stats,hasCourse:id=>loaded.has(id),cacheValue:key=>core.clone(key==='shizhi-extra-courses'?last.courses:key==='shizhi-restored-lessons'?last.lessons:last.state[Object.keys(fields).find(f=>fields[f]===key)]??null),manages:key=>Object.values(fields).includes(key)||['shizhi-extra-courses','shizhi-restored-lessons'].includes(key),inspect:()=>({revision,dirty,online,busy,archiveBusy,quarkConnected,lastSyncError,syncCourseId,pendingCourses:[...pending],loadedCourses:[...loaded],archivedFiles:[...archivedFiles]})};
  const cleanedDeletes=new Set();
  async function cleanupDeletedFiles(){for(const d of (last.state.deletedFiles||[]).filter(d=>!cleanedDeletes.has(d.id)).slice(0,3)){try{const data=await result(await request('/api/files/'+encodeURIComponent(d.id),{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({courseId:d.course})}));if(!data.cleanupPending)cleanedDeletes.add(d.id);}catch{/* Retry retained cleanup markers on the next sync. */}}}
  const deletionDelay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
