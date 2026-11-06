@@ -70,21 +70,4 @@ body.workspace-dragging,body.workspace-dragging *{user-select:none!important}bod
 .context-progress-label{display:block;margin:12px 0 8px;font-size:12px;color:var(--ink)}.context-progress-editor{display:block;box-sizing:border-box;width:100%;margin-top:7px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--paper);color:var(--ink);font:inherit;line-height:1.6;resize:vertical}.context-progress-editor:focus{outline:2px solid var(--green);outline-offset:1px}.conversation-documents [role=status]{margin-left:10px;font-size:11px;color:var(--ink)}
 .pdf-pages-label{display:flex;align-items:center;gap:7px;flex-wrap:wrap;font-size:11px;color:var(--muted)}.pdf-pages-label select,.pdf-pages-label input{width:150px;max-width:100%;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--paper);color:var(--ink);font-size:11px}
 
-/* Give homework its own cool palette and readable text. */
-#homework-view{--ink:#294550;--muted:#526b73;--green:#406c79;--line:#d5e3e5;--paper:#f7fafb;--mint:#e5f0f2;--gold:#83aab2;--area-soft:#eaf3f4;--area-panel:#fcfefe;--body-text:#304b55;color:var(--ink)}
-#homework-view .homework-sheets{background:#eaf3f4;border-color:var(--line)}
-#homework-view :is(.homework-sheets-heading p,.homework-sheets-empty,.homework-sheets-heading h2 span){color:var(--muted)}
-#homework-view :is(.btn.soft,.workspace-tools button){background:#fcfefe;border-color:var(--line);color:#345c68}
-#homework-view :is(.btn.soft,.workspace-tools button):hover{background:#dcebef}
-#homework-view .btn.primary{background:var(--green);color:#fff}
-#homework-view .btn.primary:hover{background:#315a66}
-#homework-view #homework-sheets-use:disabled{background:#d9e6e9;color:#4e6870;opacity:1}
-#homework-view .conversation-layout{background:#fcfefe;border-color:var(--line)}
-#homework-view .conversation-history{background:#eaf3f4}
-#homework-view .conversation-heading{background:#fcfefe}
-#homework-view :is(.conversation-heading small,.message-meta,.chat-rename){color:#526b73}
-#homework-view .chat-compose{background:#f2f8f9}
-#homework-view .chat-compose textarea{background:#fff;border-color:#c8dce0;color:var(--ink)}
-#homework-view .chat-message.user .message-body{background:#e5f0f2;border-color:#cfdee2;color:var(--ink)}
-#homework-view .chat-message.assistant .message-body{background:#fff;border-color:#d9e5e7;color:var(--body-text)}
-#homework-view .message-body pre{background:#eaf3f4;color:#294550}
+#homework-view .homework-sheets{background:transparent;border:0;padding:0}
